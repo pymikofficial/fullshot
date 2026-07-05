@@ -2,6 +2,8 @@
 
 A Chrome extension that captures a full page screenshot in one click, including everything below the fold, no scrolling and stitching required.
 
+> **Pending Chrome Web Store review.** In the meantime, install it unpacked in under a minute, see [Installation](#installation-unpacked-for-now) below.
+
 ## Why
 
 Most "full page screenshot" tools scroll the page in segments and stitch the images together client-side. That approach is slow, visibly janky, and breaks in predictable ways: sticky headers repeat in every segment, and lazy-loaded images below the fold often never render because the tool never actually paused there long enough.
