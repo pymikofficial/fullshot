@@ -2,7 +2,7 @@
 
 A Chrome extension that captures a full page screenshot in one click, including everything below the fold, no scrolling and stitching required.
 
-> **Pending Chrome Web Store review.** In the meantime, install it unpacked in under a minute, see [Installation](#installation-unpacked-for-now) below.
+> **Live on the Chrome Web Store.** [Install Fullshot](https://chromewebstore.google.com/detail/fullshot-full-page-screen/gdejgnbdmnfpdalaaefhmbecnecdfkbf) in one click, or see [Installation](#installation) below to run it unpacked from source.
 
 ## Why
 
@@ -30,7 +30,11 @@ No visible scrolling, no stitching artifacts, no repeated headers.
 - `downloads`, saves the resulting PNG
 - `notifications`, confirms when a screenshot is saved, or reports an error
 
-## Installation (unpacked, for now)
+## Installation
+
+The easiest way is the [Chrome Web Store listing](https://chromewebstore.google.com/detail/fullshot-full-page-screen/gdejgnbdmnfpdalaaefhmbecnecdfkbf).
+
+To run it unpacked from source instead:
 
 1. Clone this repo.
 2. Go to `chrome://extensions`, enable Developer mode.

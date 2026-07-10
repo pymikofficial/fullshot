@@ -2,26 +2,42 @@
 // doesn't attach the debugger twice and crash.
 const capturingTabs = new Set();
 
-const MAX_HEIGHT = 20000; // safety cap for pathological infinite-scroll pages
+// Safety cap for pathological infinite-scroll pages. Kept conservative because the
+// captured PNG is held as a base64 data URL in the MV3 service worker's memory,
+// which is more constrained than a normal page context.
+const MAX_HEIGHT = 12000;
 const SCROLL_STEP = 600;
 const SCROLL_PAUSE_MS = 120;
 
 chrome.action.onClicked.addListener((tab) => {
   runCapture(tab).catch((err) => {
     console.error('Fullshot error:', err);
-    notify('Fullshot failed', err.message || 'Something went wrong.');
+    const message = err.userFacing ? err.message : 'Something went wrong capturing this page. Try again in a moment.';
+    notify('Fullshot failed', message);
     setBadge(tab.id, '!', '#ff6b6b');
     setTimeout(() => clearBadge(tab.id), 2500);
     capturingTabs.delete(tab.id);
   });
 });
 
+// The pre-scroll pass (run inside the page) reports progress here so the
+// toolbar badge can show something other than a static "..." for a few seconds.
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg && msg.type === 'fullshot-scroll-progress' && sender.tab && capturingTabs.has(sender.tab.id)) {
+    setBadge(sender.tab.id, `${msg.pct}%`, '#a78bfa');
+  }
+});
+
+function userError(message) {
+  return Object.assign(new Error(message), { userFacing: true });
+}
+
 async function runCapture(tab) {
   if (!tab.id || !tab.url) {
-    throw new Error('No active tab found.');
+    throw userError('No active tab found.');
   }
   if (isRestrictedUrl(tab.url)) {
-    throw new Error("Can't capture this page (browser-internal or restricted pages aren't allowed).");
+    throw userError("Can't capture this page (browser-internal or restricted pages aren't allowed).");
   }
   if (capturingTabs.has(tab.id)) {
     return; // already running, ignore the extra click
@@ -29,6 +45,8 @@ async function runCapture(tab) {
 
   capturingTabs.add(tab.id);
   setBadge(tab.id, '...', '#a78bfa');
+
+  let debuggerAttached = false;
 
   try {
     // Pre-scroll pass: trigger any lazy-loaded images/content before we capture,
@@ -38,8 +56,10 @@ async function runCapture(tab) {
       func: scrollThroughPage,
       args: [SCROLL_STEP, SCROLL_PAUSE_MS]
     });
+    setBadge(tab.id, '...', '#a78bfa');
 
     await attachDebugger(tab.id);
+    debuggerAttached = true;
 
     await sendCommand(tab.id, 'Page.enable', {});
     const metrics = await sendCommand(tab.id, 'Page.getLayoutMetrics', {});
@@ -69,6 +89,7 @@ async function runCapture(tab) {
 
     await sendCommand(tab.id, 'Emulation.clearDeviceMetricsOverride', {});
     await detachDebugger(tab.id);
+    debuggerAttached = false;
 
     const filename = buildFilename(tab.url, tab.title);
     await chrome.downloads.download({
@@ -81,6 +102,9 @@ async function runCapture(tab) {
     notify('Screenshot saved', filename.split('/').pop());
     setTimeout(() => clearBadge(tab.id), 1800);
   } finally {
+    if (debuggerAttached) {
+      await detachDebugger(tab.id);
+    }
     capturingTabs.delete(tab.id);
   }
 }
@@ -124,6 +148,10 @@ function scrollThroughPage(step, pauseMs) {
     function step_() {
       window.scrollTo(0, current);
       current += step;
+      const pct = Math.min(100, Math.round((current / totalHeight) * 100));
+      try {
+        chrome.runtime.sendMessage({ type: 'fullshot-scroll-progress', pct });
+      } catch (e) {}
       if (current < totalHeight) {
         setTimeout(step_, pauseMs);
       } else {
@@ -141,7 +169,8 @@ function isRestrictedUrl(url) {
     url.startsWith('chrome-extension://') ||
     url.startsWith('edge://') ||
     url.startsWith('about:') ||
-    url.startsWith('https://chrome.google.com/webstore')
+    url.startsWith('https://chrome.google.com/webstore') ||
+    url.startsWith('https://chromewebstore.google.com')
   );
 }
 
@@ -149,7 +178,9 @@ function buildFilename(url, title) {
   let host = 'page';
   try {
     host = new URL(url).hostname.replace(/^www\./, '');
-  } catch (e) {}
+  } catch (e) {
+    console.warn('Fullshot: could not parse URL for filename, using fallback.', e);
+  }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   return `fullshot/${host}-${stamp}.png`;
 }
