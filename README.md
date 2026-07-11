@@ -43,7 +43,7 @@ To run it unpacked from source instead:
 
 ## Known limitations
 
-- Pages with genuinely infinite scroll are capped at 20,000px tall to avoid pathological captures.
+- Pages with genuinely infinite scroll are capped at 12,000px tall to avoid pathological captures.
 - Won't work on `chrome://` pages, the Chrome Web Store, or other browser-internal pages, Chrome blocks the debugger API there for all extensions.
 - Using the debugger API shows a brief "extension started debugging this browser" notice in the tab, this is standard Chrome behavior for any extension using DevTools Protocol, not a bug.
 
