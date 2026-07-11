@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Fullshot ~ Full Page Screenshot",
+  "name": "Full Webpage Screenshot",
   "version": "1.1.0",
-  "description": "Capture a full-resolution page screenshot in one click, including everything below the fold.",
+  "description": "Capture a full-resolution screenshot of the entire webpage in one click, including everything below the fold.",
   "permissions": ["debugger", "activeTab", "downloads", "notifications", "scripting"],
   "action": {
-    "default_title": "Capture full page screenshot",
+    "default_title": "Capture full webpage screenshot",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

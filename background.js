@@ -31,9 +31,9 @@ const SCROLL_PAUSE_MS = 120;
 
 chrome.action.onClicked.addListener((tab) => {
   runCapture(tab).catch((err) => {
-    console.error('Fullshot error:', err);
+    console.error('Full Webpage Screenshot error:', err);
     const message = err.userFacing ? err.message : 'Something went wrong capturing this page. Try again in a moment.';
-    notify('Fullshot failed', message);
+    notify('Capture failed', message);
     setBadge(tab.id, '!', '#ff6b6b');
     setTimeout(() => clearBadge(tab.id), 2500);
     capturingTabs.delete(tab.id);
@@ -269,10 +269,10 @@ function buildFilename(url, title) {
   try {
     host = new URL(url).hostname.replace(/^www\./, '');
   } catch (e) {
-    console.warn('Fullshot: could not parse URL for filename, using fallback.', e);
+    console.warn('Full Webpage Screenshot: could not parse URL for filename, using fallback.', e);
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  return `fullshot/${host}-${stamp}.png`;
+  return `full-webpage-screenshot/${host}-${stamp}.png`;
 }
 
 function setBadge(tabId, text, color) {

@@ -1,14 +1,14 @@
-# Fullshot
+# Full Webpage Screenshot
 
-A Chrome extension that captures a full page screenshot in one click, including everything below the fold, no scrolling and stitching required.
+A Chrome extension that captures a full webpage screenshot in one click, including everything below the fold, no scrolling and stitching required.
 
-> **Live on the Chrome Web Store.** [Install Fullshot](https://chromewebstore.google.com/detail/fullshot-full-page-screen/gdejgnbdmnfpdalaaefhmbecnecdfkbf) in one click, or see [Installation](#installation) below to run it unpacked from source.
+> **Live on the Chrome Web Store.** [Install Full Webpage Screenshot](https://chromewebstore.google.com/detail/fullshot-full-page-screen/gdejgnbdmnfpdalaaefhmbecnecdfkbf) in one click, or see [Installation](#installation) below to run it unpacked from source.
 
 ## Why
 
 Most "full page screenshot" tools scroll the page in segments and stitch the images together client-side. That approach is slow, visibly janky, and breaks in predictable ways: sticky headers repeat in every segment, and lazy-loaded images below the fold often never render because the tool never actually paused there long enough.
 
-Fullshot avoids this differently. It uses the Chrome DevTools Protocol to measure the page's true full content height, then actually resizes the page's rendered viewport to match that height using `Emulation.setDeviceMetricsOverride`, and takes one completely normal screenshot once the layout has settled, at 2x resolution rather than the browser's default 1x, so captures stay sharp when you zoom in on small text. Before that, it does one quick scroll-through pass to trigger any lazy-loaded content, then returns to the top so sticky elements render in their natural state.
+This extension avoids this differently. It uses the Chrome DevTools Protocol to measure the page's true full content height, then actually resizes the page's rendered viewport to match that height using `Emulation.setDeviceMetricsOverride`, and takes one completely normal screenshot once the layout has settled, at 2x resolution rather than the browser's default 1x, so captures stay sharp when you zoom in on small text. Before that, it does one quick scroll-through pass to trigger any lazy-loaded content, then returns to the top so sticky elements render in their natural state.
 
 This matters more than it sounds like it should. Chrome also offers a `captureBeyondViewport` mode that claims to capture past the visible viewport in a single call without resizing anything, but on real-world pages with sticky headers or `vh`-based layout sections, it can duplicate paint tiles and produce a screenshot with the same content repeated several times. Actually resizing the viewport and capturing normally sidesteps that bug entirely, since there's no internal tiling involved at all.
 
@@ -18,7 +18,7 @@ This matters more than it sounds like it should. Chrome also offers a `captureBe
 2. It scrolls through the page once (fast, in the background) to trigger lazy-loaded images, then returns to the top.
 3. It attaches the Chrome DevTools Protocol, measures the full page height, and resizes the page's actual viewport to match it.
 4. Once the layout settles, it takes one normal screenshot at that size, at 2x resolution, then restores the original viewport.
-5. The PNG downloads automatically into a `fullshot/` folder in your Downloads, named after the site and timestamp.
+5. The PNG downloads automatically into a `full-webpage-screenshot/` folder in your Downloads, named after the site and timestamp.
 
 No visible scrolling, no stitching artifacts, no repeated headers, for pages that fit in one capture (see below for what happens when a page doesn't).
 
