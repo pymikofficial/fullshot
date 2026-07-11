@@ -2,10 +2,30 @@
 // doesn't attach the debugger twice and crash.
 const capturingTabs = new Set();
 
-// Safety cap for pathological infinite-scroll pages. Kept conservative because the
-// captured PNG is held as a base64 data URL in the MV3 service worker's memory,
-// which is more constrained than a normal page context.
-const MAX_HEIGHT = 12000;
+// v1.0.1 forced deviceScaleFactor: 1 regardless of the page's real pixel
+// density, so a 944px-wide capture only ever had 944 real pixels of width no
+// matter how text-dense the source page was, blurry on any zoom. This forces
+// a real scale instead.
+const CAPTURE_SCALE = 2;
+
+// Two independent ceilings on a single CDP capture: a per-dimension limit
+// (GPU texture size limits mean captures much beyond ~16,384px in one
+// dimension can fail or come back corrupted) and a total-pixel limit (the
+// captured PNG is held as a base64 data URL in the MV3 service worker's
+// memory, which is more constrained than a normal page context). At
+// CAPTURE_SCALE 2x, forcing real resolution means far less content fits in
+// one shot than the old scale-1 code assumed, so instead of silently
+// cropping anything past a fixed height (what v1.0.1 did), a page that
+// doesn't fit gets split into multiple full-resolution files instead of one
+// blurry or truncated one.
+const MAX_DIMENSION_PX = 16000;
+const MAX_CAPTURE_PIXELS = 40000000;
+
+// Outer bound on total page height processed at all, independent of
+// splitting, purely to keep pathological infinite-scroll pages from
+// generating an unbounded number of part files.
+const MAX_PARTS = 12;
+
 const SCROLL_STEP = 600;
 const SCROLL_PAUSE_MS = 120;
 
@@ -65,41 +85,85 @@ async function runCapture(tab) {
     const metrics = await sendCommand(tab.id, 'Page.getLayoutMetrics', {});
     const contentSize = metrics.cssContentSize || metrics.contentSize;
 
-    const width = Math.ceil(contentSize.width);
-    const height = Math.min(Math.ceil(contentSize.height), MAX_HEIGHT);
+    const rawWidth = Math.ceil(contentSize.width);
+    const rawHeight = Math.ceil(contentSize.height);
 
-    // Force the page's actual viewport to the full content height, rather than
-    // relying on captureBeyondViewport's internal tiling, which can duplicate
-    // paint layers on pages with sticky headers or vh-based sections.
-    await sendCommand(tab.id, 'Emulation.setDeviceMetricsOverride', {
-      width,
-      height,
-      deviceScaleFactor: 1,
-      mobile: false
-    });
+    // If a single dimension is so wide that even width alone would blow the
+    // texture-size ceiling at full scale, shrink the effective scale for
+    // this capture rather than clip content. Rare in practice: most pages
+    // that are extremely wide are wide because of one runaway element, not
+    // real content worth full resolution.
+    const scale = rawWidth * CAPTURE_SCALE > MAX_DIMENSION_PX
+      ? Math.max(1, Math.floor((MAX_DIMENSION_PX / rawWidth) * 10) / 10)
+      : CAPTURE_SCALE;
 
-    // Let the page settle at its new size before capturing, layout/reflow
-    // and any scroll-position resets need a beat to finish.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    const width = rawWidth;
 
-    const result = await sendCommand(tab.id, 'Page.captureScreenshot', {
-      format: 'png',
-      captureBeyondViewport: false
-    });
+    // Max CSS height that fits in one capture at this scale, respecting both
+    // the per-dimension ceiling and the total-pixel ceiling.
+    const maxCssHeightByDimension = Math.floor(MAX_DIMENSION_PX / scale);
+    const maxCssHeightByPixels = Math.floor(MAX_CAPTURE_PIXELS / (width * scale * scale));
+    const maxCssHeightPerCapture = Math.max(1, Math.min(maxCssHeightByDimension, maxCssHeightByPixels));
 
-    await sendCommand(tab.id, 'Emulation.clearDeviceMetricsOverride', {});
+    // Outer safety bound: cap total processed height so a pathological
+    // infinite-scroll page can't generate an unbounded number of parts.
+    const totalHeight = Math.min(rawHeight, maxCssHeightPerCapture * MAX_PARTS);
+
+    const parts = [];
+    if (totalHeight <= maxCssHeightPerCapture) {
+      // Fits in one shot: identical approach to v1.0.1 (resize the viewport
+      // to the full content height and capture once, no scrolling involved,
+      // so sticky headers only ever render once), just at real resolution
+      // instead of forced 1x.
+      const data = await captureAtCurrentScroll(tab.id, width, totalHeight, scale);
+      parts.push(data);
+    } else {
+      // Doesn't fit even at full resolution: split into multiple
+      // full-resolution files instead of silently cropping or blurring.
+      // Known tradeoff: each part is captured after scrolling the real page
+      // to that offset, so a sticky/fixed header will render again at the
+      // top of every part after the first, unlike the single-shot path.
+      let offset = 0;
+      while (offset < totalHeight) {
+        const sliceHeight = Math.min(maxCssHeightPerCapture, totalHeight - offset);
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (y) => window.scrollTo(0, y),
+          args: [offset]
+        });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const data = await captureAtCurrentScroll(tab.id, width, sliceHeight, scale);
+        parts.push(data);
+        offset += sliceHeight;
+      }
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.scrollTo(0, 0)
+      });
+    }
+
     await detachDebugger(tab.id);
     debuggerAttached = false;
 
-    const filename = buildFilename(tab.url, tab.title);
-    await chrome.downloads.download({
-      url: 'data:image/png;base64,' + result.data,
-      filename,
-      saveAs: false
-    });
+    const baseFilename = buildFilename(tab.url, tab.title);
+    for (let i = 0; i < parts.length; i++) {
+      const filename = parts.length > 1
+        ? baseFilename.replace(/\.png$/, `_part${i + 1}-of-${parts.length}.png`)
+        : baseFilename;
+      await chrome.downloads.download({
+        url: 'data:image/png;base64,' + parts[i],
+        filename,
+        saveAs: false
+      });
+    }
 
     setBadge(tab.id, '✓', '#5cd6a3');
-    notify('Screenshot saved', filename.split('/').pop());
+    notify(
+      'Screenshot saved',
+      parts.length > 1
+        ? `${baseFilename.split('/').pop()} split into ${parts.length} full-resolution parts`
+        : baseFilename.split('/').pop()
+    );
     setTimeout(() => clearBadge(tab.id), 1800);
   } finally {
     if (debuggerAttached) {
@@ -107,6 +171,32 @@ async function runCapture(tab) {
     }
     capturingTabs.delete(tab.id);
   }
+}
+
+// Resizes the emulated viewport to (width x cssHeight) at the given scale
+// and captures whatever's currently in view. Caller is responsible for
+// scrolling the real page to the right offset first, this only handles the
+// viewport-resize-and-capture step shared by both the single-shot and
+// multi-part paths.
+async function captureAtCurrentScroll(tabId, width, cssHeight, scale) {
+  await sendCommand(tabId, 'Emulation.setDeviceMetricsOverride', {
+    width,
+    height: cssHeight,
+    deviceScaleFactor: scale,
+    mobile: false
+  });
+
+  // Let the page settle at its new size before capturing, layout/reflow
+  // and any scroll-position resets need a beat to finish.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const result = await sendCommand(tabId, 'Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: false
+  });
+
+  await sendCommand(tabId, 'Emulation.clearDeviceMetricsOverride', {});
+  return result.data;
 }
 
 function attachDebugger(tabId) {
