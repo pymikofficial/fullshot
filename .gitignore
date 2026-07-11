@@ -1,2 +1,6 @@
 # Local Claude Code permissions (may embed secrets in allow-listed commands, never public)
 .claude/
+
+# Local-only: packaged build zip, Chrome Web Store listing copy, marketing
+# screenshots. Not source, not meant to be public.
+fullshot_assets/
